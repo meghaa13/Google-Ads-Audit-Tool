@@ -1,0 +1,19 @@
+# Secrets
+.env
+*.yaml
+*.yml
+*.json
+
+# User OAuth tokens
+user_tokens/
+flask_session/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated
+generated_reports/
+report_images/
+
+ChromeDebugProfile/
