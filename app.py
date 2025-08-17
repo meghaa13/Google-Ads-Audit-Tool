@@ -43,7 +43,7 @@ SCOPES = [
 ]
 
 # OAuth redirect
-REDIRECT_URI = "http://localhost:5000/callback"
+REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5000/callback")
 
 # ====== Helpers =============================================================
 
