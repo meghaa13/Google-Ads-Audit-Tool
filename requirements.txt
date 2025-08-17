@@ -1,3 +1,4 @@
+--only-binary=:all:
 pip
 setuptools>=65.0
 wheel
@@ -212,3 +213,4 @@ wsproto==1.2.0
 XlsxWriter==3.2.0
 yarl==1.9.4
 zopfli==0.2.3.post1
+
