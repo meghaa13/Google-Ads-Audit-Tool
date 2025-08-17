@@ -19,7 +19,7 @@ def fetch_hourly_performance_data(client: GoogleAdsClient, customer_id: str):
         LIMIT 10000
     """
     try:
-        response = service.search_stream(customer_id=customer_id, query=query, metadata=(("login-customer-id", "9323527146"),))
+        response = service.search_stream(customer_id=customer_id, query=query)
     except Exception as e:
         print(f"❌ Error fetching hourly data: {e}")
         return pd.DataFrame(), pd.DataFrame()

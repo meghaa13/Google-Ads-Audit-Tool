@@ -17,7 +17,7 @@ def fetch_campaign_data(client: GoogleAdsClient, customer_id: str, date_range="L
         LIMIT 100
     """
     try:
-        response = service.search_stream(customer_id=customer_id, query=query, metadata=(("login-customer-id", "9323527146"),))
+        response = service.search_stream(customer_id=customer_id, query=query)
     except Exception as e:
         print(f"❌ Error fetching campaign data: {e}")
         return pd.DataFrame()
