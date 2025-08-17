@@ -67,28 +67,34 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email"
 ]
-REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5000/callback")
+
+# ✅ Always prefer Render env vars, fallback to localhost only in dev
+APP_HOST = os.environ.get("APP_HOST", "http://localhost:5000")
+REDIRECT_URI = os.environ.get("REDIRECT_URI", f"{APP_HOST}/callback")
+JS_ORIGIN = os.environ.get("JS_ORIGIN", APP_HOST)
 
 # ====== OAuth Flow helper ===================================================
 def get_flow(state=None):
     """
     Build a Flow either from client-secrets-web.json (if present)
-    or from environment variables (Render deployment).
+    or from environment variables.
     """
     if os.path.isfile("client-secrets-web.json"):
-        # Local dev mode: load from JSON file
+        if state:
+            return Flow.from_client_secrets_file(
+                "client-secrets-web.json",
+                scopes=SCOPES,
+                state=state,
+                redirect_uri=REDIRECT_URI
+            )
         return Flow.from_client_secrets_file(
             "client-secrets-web.json",
             scopes=SCOPES,
-            redirect_uri=REDIRECT_URI,
-            state=state
+            redirect_uri=REDIRECT_URI
         )
 
-    # Production mode: build config from environment variables
     client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
-    #js_origin = os.getenv("JS_ORIGIN", "http://localhost:5000")
-
     if not client_id or not client_secret:
         raise RuntimeError("Missing OAuth credentials: set GOOGLE_ADS_CLIENT_ID and GOOGLE_ADS_CLIENT_SECRET")
 
@@ -100,15 +106,12 @@ def get_flow(state=None):
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [REDIRECT_URI],
-            #"javascript_origins": [js_origin],
+            "javascript_origins": [JS_ORIGIN],
         }
     }
-    return Flow.from_client_config(
-        client_config,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-        state=state
-    )
+    if state:
+        return Flow.from_client_config(client_config, scopes=SCOPES, state=state, redirect_uri=REDIRECT_URI)
+    return Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=REDIRECT_URI)
 
 # ====== Helpers =============================================================
 def user_yaml_path_for_email(email: str) -> str:
