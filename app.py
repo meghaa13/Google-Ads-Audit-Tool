@@ -1,4 +1,4 @@
-# app.py
+# app.py (updated — copy-paste this file)
 import os
 import re
 import json
@@ -11,11 +11,15 @@ from google_auth_oauthlib.flow import Flow
 from google.ads.googleads.client import GoogleAdsClient
 from google.oauth2 import id_token
 from google.auth.transport import requests
+from dotenv import load_dotenv
 
 # your report logic
 from audit.main_runner import generate_google_ads_report
 
 # ====== Basic app config ====================================================
+# For local development you can use a .env file (do NOT commit .env with secrets)
+load_dotenv()
+
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # dev only (use HTTPS in prod)
 
 app = Flask(__name__)
@@ -30,10 +34,43 @@ Session(app)
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 os.makedirs("user_tokens", exist_ok=True)
 
-# ----- Base google-ads YAML (must exist) -----------------------------------
+# ----- Base google-ads YAML (template) -------------------------------------
+# We prefer reading secrets from environment variables in production (Render).
+# If a local base_google-ads.yaml exists (dev), it will be used instead.
 BASE_YAML_PATH = "base_google-ads.yaml"
-with open(BASE_YAML_PATH, "r") as f:
-    base_config = yaml.safe_load(f)
+
+def _load_base_config_from_file(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+# First: try file (local dev)
+base_config = {}
+if os.path.isfile(BASE_YAML_PATH):
+    base_config = _load_base_config_from_file(BASE_YAML_PATH)
+else:
+    # Second (recommended in production): build base_config from environment variables (Render)
+    base_config = {
+        "developer_token": os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN"),
+        "client_id": os.getenv("GOOGLE_ADS_CLIENT_ID"),
+        "client_secret": os.getenv("GOOGLE_ADS_CLIENT_SECRET"),
+        # refresh_token intentionally left blank in base; each user gets their own refresh_token created at OAuth callback
+        "refresh_token": os.getenv("GOOGLE_ADS_REFRESH_TOKEN") or None,
+        "login_customer_id": os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID") or None,
+    }
+
+# Validate required base values
+_required = ["developer_token", "client_id", "client_secret"]
+_missing = [k for k in _required if not base_config.get(k)]
+if _missing:
+    raise RuntimeError(
+        "Missing Google Ads base configuration. Provide a local 'base_google-ads.yaml' for development, "
+        "or set the following environment variables on Render: "
+        "GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET. "
+        f"Missing: {', '.join(_missing)}"
+    )
 
 # ----- Fixed scopes ---------------------------------------------------------
 SCOPES = [
@@ -42,7 +79,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email"
 ]
 
-# OAuth redirect
+# OAuth redirect (set in Render environment for production)
 REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5000/callback")
 
 # ====== Helpers =============================================================
@@ -53,7 +90,7 @@ def user_yaml_path_for_email(email: str) -> str:
 
 def load_persisted_users():
     """
-    Load ANY .yaml/.yml from user_tokens and key it by filename (without ext).
+    Load ANY .yaml/.yml from user_tokens and key them by filename (without ext).
     This makes previously-saved files always visible, regardless of naming rules.
     """
     users = {}
@@ -66,12 +103,17 @@ def load_persisted_users():
     return users
 
 def read_yaml(path):
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
 def write_yaml(path, data):
-    with open(path, "w") as f:
+    # Write YAML and attempt to tighten permissions (best-effort in container)
+    with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False)
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
 
 def normalize_customer_id(cid: str) -> str:
     """Strip spaces/dashes: '123-456-7890' -> '1234567890'."""
@@ -85,6 +127,7 @@ def load_client_with_optional_login(auth_file: str, login_customer_id: str | Non
     """
     cfg = read_yaml(auth_file)
     cfg = cfg or {}
+    # Fill missing keys from base_config (template values)
     cfg.setdefault("developer_token", base_config.get("developer_token"))
     cfg.setdefault("client_id", base_config.get("client_id"))
     cfg.setdefault("client_secret", base_config.get("client_secret"))
@@ -98,6 +141,7 @@ def load_client_with_optional_login(auth_file: str, login_customer_id: str | Non
 PERSISTED_USERS = load_persisted_users()
 
 # ====== Routes ==============================================================
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     # make session aware of what's on disk (once per session)
@@ -368,5 +412,4 @@ def parse_docx_to_structured(path):
 
 # ====== Run ================================================================
 if __name__ == "__main__":
-    import os
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
