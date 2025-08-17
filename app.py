@@ -1,4 +1,3 @@
-# app.py (updated — copy-paste this file)
 import os
 import re
 import json
@@ -17,9 +16,7 @@ from dotenv import load_dotenv
 from audit.main_runner import generate_google_ads_report
 
 # ====== Basic app config ====================================================
-# For local development you can use a .env file (do NOT commit .env with secrets)
 load_dotenv()
-
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # dev only (use HTTPS in prod)
 
 app = Flask(__name__)
@@ -34,9 +31,7 @@ Session(app)
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 os.makedirs("user_tokens", exist_ok=True)
 
-# ----- Base google-ads YAML (template) -------------------------------------
-# We prefer reading secrets from environment variables in production (Render).
-# If a local base_google-ads.yaml exists (dev), it will be used instead.
+# ----- Base google-ads YAML -------------------------------------------------
 BASE_YAML_PATH = "base_google-ads.yaml"
 
 def _load_base_config_from_file(path: str) -> dict:
@@ -46,28 +41,22 @@ def _load_base_config_from_file(path: str) -> dict:
     except Exception:
         return {}
 
-# First: try file (local dev)
-base_config = {}
 if os.path.isfile(BASE_YAML_PATH):
     base_config = _load_base_config_from_file(BASE_YAML_PATH)
 else:
-    # Second (recommended in production): build base_config from environment variables (Render)
     base_config = {
         "developer_token": os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN"),
         "client_id": os.getenv("GOOGLE_ADS_CLIENT_ID"),
         "client_secret": os.getenv("GOOGLE_ADS_CLIENT_SECRET"),
-        # refresh_token intentionally left blank in base; each user gets their own refresh_token created at OAuth callback
         "refresh_token": os.getenv("GOOGLE_ADS_REFRESH_TOKEN") or None,
         "login_customer_id": os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID") or None,
     }
 
-# Validate required base values
 _required = ["developer_token", "client_id", "client_secret"]
 _missing = [k for k in _required if not base_config.get(k)]
 if _missing:
     raise RuntimeError(
-        "Missing Google Ads base configuration. Provide a local 'base_google-ads.yaml' for development, "
-        "or set the following environment variables on Render: "
+        "Missing Google Ads base configuration. Provide 'base_google-ads.yaml' or set env vars: "
         "GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET. "
         f"Missing: {', '.join(_missing)}"
     )
@@ -78,27 +67,60 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email"
 ]
-
-# OAuth redirect (set in Render environment for production)
 REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5000/callback")
 
-# ====== Helpers =============================================================
+# ====== OAuth Flow helper ===================================================
+def get_flow(state=None):
+    """
+    Build a Flow either from client-secrets-web.json (if present)
+    or from environment variables (Render deployment).
+    """
+    if os.path.isfile("client-secrets-web.json"):
+        # Local dev mode: load from JSON file
+        return Flow.from_client_secrets_file(
+            "client-secrets-web.json",
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI,
+            state=state
+        )
 
+    # Production mode: build config from environment variables
+    client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
+    #js_origin = os.getenv("JS_ORIGIN", "http://localhost:5000")
+
+    if not client_id or not client_secret:
+        raise RuntimeError("Missing OAuth credentials: set GOOGLE_ADS_CLIENT_ID and GOOGLE_ADS_CLIENT_SECRET")
+
+    client_config = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [REDIRECT_URI],
+            #"javascript_origins": [js_origin],
+        }
+    }
+    return Flow.from_client_config(
+        client_config,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI,
+        state=state
+    )
+
+# ====== Helpers =============================================================
 def user_yaml_path_for_email(email: str) -> str:
-    """Store YAML as the raw email (safe on normal filesystems)."""
     return os.path.join("user_tokens", f"{email.lower()}.yaml")
 
 def load_persisted_users():
-    """
-    Load ANY .yaml/.yml from user_tokens and key them by filename (without ext).
-    This makes previously-saved files always visible, regardless of naming rules.
-    """
     users = {}
     for fname in os.listdir("user_tokens"):
         if not (fname.endswith(".yaml") or fname.endswith(".yml")):
             continue
         path = os.path.join("user_tokens", fname)
-        key = os.path.splitext(fname)[0]  # e.g., campaigns@unyscape.com
+        key = os.path.splitext(fname)[0]
         users[key] = path
     return users
 
@@ -107,7 +129,6 @@ def read_yaml(path):
         return yaml.safe_load(f) or {}
 
 def write_yaml(path, data):
-    # Write YAML and attempt to tighten permissions (best-effort in container)
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False)
     try:
@@ -116,35 +137,25 @@ def write_yaml(path, data):
         pass
 
 def normalize_customer_id(cid: str) -> str:
-    """Strip spaces/dashes: '123-456-7890' -> '1234567890'."""
     return re.sub(r"[^0-9]", "", cid or "")
 
 def load_client_with_optional_login(auth_file: str, login_customer_id: str | None):
-    """
-    Load GoogleAdsClient from a YAML file.
-    If login_customer_id is provided, use it for THIS RUN only (no file write).
-    Otherwise, use whatever is in the YAML.
-    """
     cfg = read_yaml(auth_file)
     cfg = cfg or {}
-    # Fill missing keys from base_config (template values)
     cfg.setdefault("developer_token", base_config.get("developer_token"))
     cfg.setdefault("client_id", base_config.get("client_id"))
     cfg.setdefault("client_secret", base_config.get("client_secret"))
     cfg.setdefault("refresh_token", base_config.get("refresh_token"))
-    # one-off override
     if login_customer_id:
         cfg["login_customer_id"] = normalize_customer_id(login_customer_id)
     return GoogleAdsClient.load_from_dict(cfg)
 
-# Preload persisted users at startup
 PERSISTED_USERS = load_persisted_users()
 
 # ====== Routes ==============================================================
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    # make session aware of what's on disk (once per session)
     if "authenticated_users" not in session:
         session["authenticated_users"] = PERSISTED_USERS.copy()
 
@@ -157,7 +168,6 @@ def index():
             return redirect(url_for("auth"))
 
         customer_id = normalize_customer_id(request.form.get("customer_id", ""))
-        # optional manager override from the form
         manager_id_override = normalize_customer_id(request.form.get("manager_id", "")) or None
 
         auth_file = authenticated_users[active_user]
@@ -171,24 +181,18 @@ def index():
         "index.html",
         authenticated=bool(active_user),
         auth_success=auth_success,
-        authenticated_users=authenticated_users,  # dict: {email_key: yaml_path}
+        authenticated_users=authenticated_users,
         active_user=active_user
     )
 
 @app.route("/auth")
 def auth():
-    # force fresh flow
     session.pop("oauth_state", None)
-
-    flow = Flow.from_client_secrets_file(
-        "client-secrets-web.json",
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
+    flow = get_flow()
     auth_url, state = flow.authorization_url(
-        access_type="offline",            # ask for refresh token
-        include_granted_scopes=False,     # don't merge old scopes
-        prompt="consent"                  # make Google actually return refresh_token
+        access_type="offline",
+        include_granted_scopes=False,
+        prompt="consent"
     )
     session["oauth_state"] = state
     return redirect(auth_url)
@@ -200,16 +204,10 @@ def callback():
     if stored_state != returned_state:
         return "⚠️ OAuth state mismatch. Try <a href='/auth'>again</a>."
 
-    flow = Flow.from_client_secrets_file(
-        "client-secrets-web.json",
-        scopes=SCOPES,
-        state=stored_state,
-        redirect_uri=REDIRECT_URI
-    )
+    flow = get_flow(state=stored_state)
     flow.fetch_token(authorization_response=request.url)
     credentials = flow.credentials
 
-    # get user email from ID token
     try:
         id_info = id_token.verify_oauth2_token(credentials.id_token, requests.Request())
         email = (id_info.get("email") or "").lower()
@@ -227,20 +225,16 @@ def callback():
             "then sign in again in an incognito window.</p>"
         )
 
-    # merge with existing YAML if present, so we never blow away saved MCC
     user_yaml = user_yaml_path_for_email(email)
     existing = read_yaml(user_yaml) if os.path.exists(user_yaml) else {}
 
     user_config = deepcopy(base_config)
-    # preserve any previously saved login_customer_id
     if "login_customer_id" in existing:
         user_config["login_customer_id"] = existing["login_customer_id"]
 
     user_config["refresh_token"] = refresh_token
-
     write_yaml(user_yaml, user_config)
 
-    # update session + global cache
     session.setdefault("authenticated_users", {})
     session["authenticated_users"][email] = user_yaml
     PERSISTED_USERS[email] = user_yaml
@@ -253,10 +247,6 @@ def callback():
 
 @app.route("/switch_user/<identifier>")
 def switch_user(identifier):
-    """
-    identifier is the key shown in the UI (the filename without .yaml),
-    e.g., 'campaigns@unyscape.com' or 'campaigns@digital.intelegencia.com'
-    """
     authenticated_users = session.get("authenticated_users", {})
     if identifier in authenticated_users:
         session["active_user"] = identifier
@@ -315,7 +305,6 @@ def report_images(filename):
     return send_from_directory("report_images", filename)
 
 # ====== Utilities (table/docx parsing) =====================================
-
 def try_parse_to_table(text):
     if not text or not isinstance(text, str):
         return None
