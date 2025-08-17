@@ -1,6 +1,7 @@
 gunicorn
 beautifulsoup4==4.13.4
 Flask==3.1.1
+Flask-Session==0.8.0
 google_auth_oauthlib==1.2.1
 matplotlib==3.10.5
 pandas==2.3.1
@@ -14,4 +15,5 @@ PyYAML==6.0.2
 PyYAML==6.0.2
 Requests==2.32.4
 seaborn==0.13.2
+
 
