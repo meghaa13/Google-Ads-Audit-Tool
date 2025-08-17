@@ -18,7 +18,7 @@ if IS_WINDOWS:
     CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 else:
     # Render/Linux: path to extracted Chromium
-    CHROME_PATH = "/usr/bin/chromium"
+    CHROME_PATH = "/usr/bin/google-chrome"
 # === User Data Dir Setup ===
 USER_DATA_DIR = os.path.join(os.getcwd(), "ChromeDebugProfile")
 os.makedirs(USER_DATA_DIR, exist_ok=True)
