@@ -4,6 +4,7 @@
 *.yml
 *.json
 
+
 # User OAuth tokens
 user_tokens/
 flask_session/
@@ -13,7 +14,13 @@ __pycache__/
 *.pyc
 
 # Generated
+*.docx
 generated_reports/
 report_images/
 
 ChromeDebugProfile/
+
+venv/
+*.zip
+requirements1.txt
+requirements3.txt
