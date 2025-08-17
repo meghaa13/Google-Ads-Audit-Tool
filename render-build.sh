@@ -1,18 +1,16 @@
 #!/bin/bash
 
-# Create a folder to store Chromium
-mkdir -p .render/chrome
+# === Update Linux package lists in Render environment ===
+apt-get update -y
 
-# Download a stable precompiled Chromium for Linux (ungoogled)
-curl -L https://github.com/ungoogled-software/ungoogled-chromium/releases/download/114.0.5735.133-1/ungoogled-chromium_114.0.5735.133-1_amd64.deb -o .render/chrome/chromium.deb || { echo "Download failed"; exit 1; }
+# === Install Chromium (headless, no GUI needed) ===
+apt-get install -y chromium
 
-# Extract Chromium to .render/chrome/
-dpkg -x .render/chrome/chromium.deb .render/chrome/ || { echo "Extraction failed"; exit 1; }
+# === Verify Chromium installation ===
+chromium --version || { echo "❌ Chromium install failed"; exit 1; }
 
-# Remove .deb file after extraction
-rm .render/chrome/chromium.deb
-
-# Install Python dependencies
-pip install -r requirements.txt || { echo "pip install failed"; exit 1; }
+# === Install Python dependencies from requirements.txt ===
+pip install --upgrade pip
+pip install -r requirements.txt || { echo "❌ pip install failed"; exit 1; }
 
 echo "✅ Build completed successfully"
