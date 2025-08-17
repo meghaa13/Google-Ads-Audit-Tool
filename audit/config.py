@@ -53,7 +53,8 @@ def ensure_chrome_debugger():
         subprocess.Popen(chrome_args)
 
 # Auto-launch Chrome
-ensure_chrome_debugger()
+if os.getenv("LAUNCH_CHROME_FROM_PYTHON", "0") == "1":
+    ensure_chrome_debugger()
 
 # === Global Config (Customer IDs) ===
 CUSTOMER_ID = os.getenv("GOOGLE_ADS_CUSTOMER_ID")

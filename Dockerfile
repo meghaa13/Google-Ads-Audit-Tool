@@ -1,33 +1,25 @@
-# Dockerfile (COPY THIS EXACTLY)
+# Dockerfile (copy exactly)
 FROM python:3.13-slim
 
-# Avoid any interactive prompts during apt operations
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# 1) Install minimal tools to fetch keys and packages
-#    - gnupg, curl/wget, ca-certificates are required so we can import Google's signing key robustly
-#    - we don't install lots of extras yet to keep build logs clear
+# 1) Minimal tools to add key and fetch packages
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      gnupg2 \
-      dirmngr \
-      wget \
-      curl \
-      ca-certificates \
-      apt-transport-https && \
+      gnupg2 dirmngr wget curl ca-certificates apt-transport-https gnupg && \
     rm -rf /var/lib/apt/lists/*
 
-# 2) Add Google signing key (secure method) and the Chrome apt source using signed-by
-#    We use gpg --dearmor to create a keyring file and reference it in sources.list.d
+# 2) Add Google signing key and repo (secure using gpg --dearmor)
 RUN set -eux; \
     curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-linux-signing-keyring.gpg; \
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
       > /etc/apt/sources.list.d/google-chrome.list
 
-# 3) Install Chrome and required libs for headless usage
-#    Add Chrome dependencies (GTK etc.) commonly required; keep --no-install-recommends to reduce size
+# 3) Install Chrome + runtime libs needed for headless usage
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       google-chrome-stable \
@@ -47,23 +39,30 @@ RUN apt-get update && \
       libpangocairo-1.0-0 \
       libgtk-3-0 \
       libxss1 \
-      xdg-utils && \
+      xdg-utils \
+    --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
 # 4) Copy requirements and install Python packages
 COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# 5) Copy application code
+# 5) Copy app code
 COPY . /app
 
-# 6) Set env vars (optional but handy)
+# 6) Copy start script and make executable
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Environment variables
 ENV CHROME_PATH=/usr/bin/google-chrome
 ENV DEBUGGING_PORT=9222
 ENV USER_DATA_DIR=/tmp/ChromeDebugProfile
+ENV PORT=10000
 
-# Expose port that Gunicorn will bind to (match your CMD)
+# Expose port (Render expects container to listen)
 EXPOSE 10000
 
-# 7) Start the app using Gunicorn
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:10000"]
+# Use start.sh to start Chrome (background) and then Gunicorn
+CMD ["/app/start.sh"]
