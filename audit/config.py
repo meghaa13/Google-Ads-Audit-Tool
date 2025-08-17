@@ -9,6 +9,53 @@ from dotenv import load_dotenv
 # === Load environment variables from .env ===
 load_dotenv()
 
+# === Platform Detection ===
+IS_WINDOWS = os.name == "nt"
+IS_RENDER = os.environ.get("RENDER") == "TRUE"  # Render sets this automatically
+
+# === Chrome Path Setup ===
+if IS_WINDOWS:
+    CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+else:
+    # Render/Linux: path to extracted Chromium
+    CHROME_PATH = os.path.join(os.getcwd(), ".render", "chrome", "usr", "bin", "chromium-browser")
+
+# === User Data Dir Setup ===
+USER_DATA_DIR = os.path.join(os.getcwd(), "ChromeDebugProfile")
+os.makedirs(USER_DATA_DIR, exist_ok=True)
+
+# === Chrome Debugging Port ===
+DEBUGGING_PORT = "9222"
+
+# === Auto-launch Chrome function ===
+def ensure_chrome_debugger():
+    """Force-launch Chrome with remote debugging enabled on port 9222."""
+    chrome_running = False
+    for proc in psutil.process_iter(attrs=['cmdline']):
+        try:
+            cmdline = " ".join(proc.info['cmdline'])
+            if f"--remote-debugging-port={DEBUGGING_PORT}" in cmdline:
+                chrome_running = True
+                break
+        except Exception:
+            continue
+
+    if not chrome_running:
+        print("🚀 Launching Chrome in debugging mode...")
+        chrome_args = [
+            CHROME_PATH,
+            f"--remote-debugging-port={DEBUGGING_PORT}",
+            f"--user-data-dir={USER_DATA_DIR}"
+        ]
+        # Add headless and Linux-specific flags on Render
+        if not IS_WINDOWS:
+            chrome_args += ["--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+
+        subprocess.Popen(chrome_args)
+
+# Auto-launch Chrome
+ensure_chrome_debugger()
+
 # === Global Config (Customer IDs) ===
 CUSTOMER_ID = os.getenv("GOOGLE_ADS_CUSTOMER_ID")
 LOGIN_CUSTOMER_ID = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID")
@@ -30,34 +77,6 @@ google_ads_config = {
 google_ads_client = GoogleAdsClient.load_from_dict(google_ads_config)
 client = google_ads_client
 
-# === Chrome Debugging Config (hardcoded, safe) ===
-CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-USER_DATA_DIR = os.path.abspath("ChromeDebugProfile")
-DEBUGGING_PORT = "9222"
-
-def ensure_chrome_debugger():
-    """Force-launch Chrome with remote debugging enabled on port 9222."""
-    chrome_running = False
-    for proc in psutil.process_iter(attrs=['cmdline']):
-        try:
-            cmdline = " ".join(proc.info['cmdline'])
-            if f"--remote-debugging-port={DEBUGGING_PORT}" in cmdline:
-                chrome_running = True
-                break
-        except Exception:
-            continue
-
-    if not chrome_running:
-        print("🚀 Launching Chrome in debugging mode...")
-        subprocess.Popen([
-            CHROME_PATH,
-            f"--remote-debugging-port={DEBUGGING_PORT}",
-            f"--user-data-dir={USER_DATA_DIR}"
-        ])
-
-# Auto-launch Chrome
-ensure_chrome_debugger()
-
 # === Environment Constants ===
 LANGUAGE = "English"
 DEVICE = "Desktop"
@@ -72,15 +91,15 @@ BID_STRATEGY_MAP = {
     12: "TARGET_CPV", 13: "TARGET_IMPRESSION_SHARE", 14: "TARGET_ROAS", 15: "TARGET_SPEND"
 }
 
-# === Geo Lookup DataFrame (SAFE for GitHub) ===
+# === Geo Lookup DataFrame ===
 GEO_LOOKUP_DF = pd.read_csv("geotargets-2025-07-15.csv")
 GEO_LOOKUP_DF = GEO_LOOKUP_DF[GEO_LOOKUP_DF["Status"] == "Active"]
 GEO_LOOKUP_DF.set_index("Criteria ID", inplace=True)
 
-# === Ensure folders exist ===
+# === Ensure required folders exist ===
 os.makedirs("report_images", exist_ok=True)
 os.makedirs("generated_reports", exist_ok=True)
 os.makedirs("user_tokens", exist_ok=True)
 
-# Backwards compatibility (old imports still work)
+# Backwards compatibility
 customer_id = CUSTOMER_ID
