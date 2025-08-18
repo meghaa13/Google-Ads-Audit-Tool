@@ -149,6 +149,7 @@ def load_client_with_optional_login(auth_file: str, login_customer_id: str | Non
     cfg.setdefault("client_id", base_config.get("client_id"))
     cfg.setdefault("client_secret", base_config.get("client_secret"))
     cfg.setdefault("refresh_token", base_config.get("refresh_token"))
+    cfg.setdefault("use_proto_plus", True) 
     if login_customer_id:
         cfg["login_customer_id"] = normalize_customer_id(login_customer_id)
     return GoogleAdsClient.load_from_dict(cfg)
