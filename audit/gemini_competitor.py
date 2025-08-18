@@ -91,7 +91,7 @@ def generate_competitor_insights(kw_df, lp_df, site_url, genai_model):
     def get_iframe_urls_for_keyword(keyword):
         iframe_urls = []
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu","--disable-setuid-sandbox"])
             context = browser.new_context()
             page = context.new_page()
             print(f"🔍 Looking for iframe URLs for keyword: {keyword}")
@@ -233,7 +233,7 @@ Avoid markdown. Only return valid JSON array.
     launch_chrome()
     competitor_ads = defaultdict(list)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(scrape_ads_for_keyword, kw) for kw in top_keywords["Keyword"]]
         for future in as_completed(futures):
             keyword, ads = future.result()
