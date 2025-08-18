@@ -75,6 +75,7 @@ def generate_competitor_insights(kw_df, lp_df, site_url, genai_model):
     primary_location = detect_primary_location(client, CUSTOMER_ID)
     print(f"📍 Using campaign location: {primary_location}")
 
+    # --- Launch background Chrome for pychrome ---
     def launch_chrome():
         try:
             subprocess.Popen([
@@ -82,57 +83,85 @@ def generate_competitor_insights(kw_df, lp_df, site_url, genai_model):
                 f"--remote-debugging-port={DEBUGGING_PORT}",
                 f"--user-data-dir={USER_DATA_DIR}",
                 "--no-first-run",
-                "--no-default-browser-check"
+                "--no-default-browser-check",
+                "--headless",
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage"
             ])
             time.sleep(4)
         except Exception as e:
             print("⚠️ Could not launch local Chrome for pychrome:", e)
 
+    # --- Get iframe URLs using Playwright ---
     def get_iframe_urls_for_keyword(keyword):
         iframe_urls = []
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu","--disable-setuid-sandbox"])
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-background-networking",
+                    "--disable-software-rasterizer"
+                ]
+            )
             context = browser.new_context()
             page = context.new_page()
             print(f"🔍 Looking for iframe URLs for keyword: {keyword}")
-            page.goto("https://ads.google.com/anon/AdPreview")
-            page.fill("input[aria-label='Enter a search term']", keyword)
-            page.keyboard.press("Enter")
-            time.sleep(3)
             try:
-                page.locator("button[aria-label='Select location']").click()
-                location_input = page.get_by_label("Enter a location to include")
-                location_input.click()
-                location_input.fill(primary_location)
-                time.sleep(1)
-                page.locator("div.list-dynamic-item.active").first.click()
-                time.sleep(1.5)
-            except:
-                pass
-            try:
-                page.locator("div.button:has(span.label-text:has-text('Language'))").click()
-                page.wait_for_selector("material-select-searchbox material-input input")
-                page.locator("material-select-searchbox material-input input").first.fill(LANGUAGE)
-                time.sleep(1)
-                page.locator("material-select-dropdown-item span.label").first.click()
-            except:
-                pass
-            try:
-                page.locator("span.button-text", has_text="Mobile").click()
-                time.sleep(1)
-                page.locator(f"material-select-dropdown-item span.label:has-text('{DEVICE}')").click()
-                time.sleep(1.5)
-            except:
-                pass
-            page.wait_for_selector("iframe.iframe-preview", timeout=8000)
-            iframe_elements = page.query_selector_all("iframe.iframe-preview")
-            for iframe in iframe_elements:
-                src = iframe.get_attribute("src")
-                if src and src.startswith("http"):
-                    iframe_urls.append(src)
-            browser.close()
+                page.goto("https://ads.google.com/anon/AdPreview", timeout=15000)
+                page.fill("input[aria-label='Enter a search term']", keyword)
+                page.keyboard.press("Enter")
+                time.sleep(3)
+
+                # Apply location
+                try:
+                    page.locator("button[aria-label='Select location']").click()
+                    location_input = page.get_by_label("Enter a location to include")
+                    location_input.click()
+                    location_input.fill(primary_location)
+                    time.sleep(1)
+                    page.locator("div.list-dynamic-item.active").first.click()
+                    time.sleep(1.5)
+                except:
+                    pass
+
+                # Language
+                try:
+                    page.locator("div.button:has(span.label-text:has-text('Language'))").click()
+                    page.wait_for_selector("material-select-searchbox material-input input")
+                    page.locator("material-select-searchbox material-input input").first.fill(LANGUAGE)
+                    time.sleep(1)
+                    page.locator("material-select-dropdown-item span.label").first.click()
+                except:
+                    pass
+
+                # Device
+                try:
+                    page.locator("span.button-text", has_text="Mobile").click()
+                    time.sleep(1)
+                    page.locator(f"material-select-dropdown-item span.label:has-text('{DEVICE}')").click()
+                    time.sleep(1.5)
+                except:
+                    pass
+
+                # Collect iframes
+                page.wait_for_selector("iframe.iframe-preview", timeout=8000)
+                iframe_elements = page.query_selector_all("iframe.iframe-preview")
+                for iframe in iframe_elements:
+                    src = iframe.get_attribute("src")
+                    if src and src.startswith("http"):
+                        iframe_urls.append(src)
+
+            except Exception as e:
+                print(f"⚠️ Error in Playwright for {keyword}: {e}")
+            finally:
+                browser.close()
         return iframe_urls
 
+    # --- Scrape ads via pychrome ---
     def scrape_ads(iframe_url):
         if pychrome is None:
             return []
@@ -159,9 +188,9 @@ def generate_competitor_insights(kw_df, lp_df, site_url, genai_model):
                     let urlEl = block.querySelector('cite');
                     let domainUrl = urlEl ? urlEl.innerText.trim() : "";
                     let domainName = domainUrl
-                        .replace(/^https?:\/\//, '')
-                        .replace(/^www\./, '')
-                        .split(/[\/\?]/)[0];
+                        .replace(/^https?:\\/\\//, '')
+                        .replace(/^www\\./, '')
+                        .split(/[\\/\\?]/)[0];
                     let adCopyEl = block.querySelector('div:nth-child(2) > div > span');
                     let adCopy = adCopyEl ? adCopyEl.innerText.trim() : "";
                     results.push({
@@ -180,17 +209,7 @@ def generate_competitor_insights(kw_df, lp_df, site_url, genai_model):
             print("⚠️ pychrome scrape error:", e)
             return []
 
-    def scrape_ads_for_keyword(keyword):
-        ads_for_keyword = []
-        try:
-            iframe_urls = get_iframe_urls_for_keyword(keyword)[:2]
-            for iframe_url in iframe_urls:
-                ads = scrape_ads(iframe_url)
-                ads_for_keyword.extend(ads)
-        except Exception as e:
-            print(f"⚠️ Error processing keyword '{keyword}': {e}")
-        return keyword, ads_for_keyword
-
+    # --- Summarize competitor with Gemini ---
     def summarize_competitor(name, ads, lp_text):
         ad_summaries = "\n".join([f"- {ad['Title']} | {ad['Ad Copy']}" for ad in ads])
         prompt = f"""
@@ -213,16 +232,11 @@ Avoid markdown. Only return valid JSON array.
 """
         try:
             response = genai_model.generate_content(prompt).text.strip()
-            return {
-                "Competitor": name,
-                "Insight": response
-            }
+            return {"Competitor": name, "Insight": response}
         except Exception as e:
-            return {
-                "Competitor": name,
-                "Insight": f"Gemini error: {e}"
-            }
+            return {"Competitor": name, "Insight": f"Gemini error: {e}"}
 
+    # --- Prepare keyword & landing page ---
     if "CVR" not in kw_df.columns:
         kw_df["CVR"] = kw_df["Conversions"] / kw_df["Clicks"].replace(0, 1)
 
@@ -233,10 +247,11 @@ Avoid markdown. Only return valid JSON array.
     launch_chrome()
     competitor_ads = defaultdict(list)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(scrape_ads_for_keyword, kw) for kw in top_keywords["Keyword"]]
-        for future in as_completed(futures):
-            keyword, ads = future.result()
+    # ✅ SEQUENTIAL loop (no threads)
+    for keyword in top_keywords["Keyword"]:
+        iframe_urls = get_iframe_urls_for_keyword(keyword)[:2]
+        for iframe_url in iframe_urls:
+            ads = scrape_ads(iframe_url)
             own_domain = site_url.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
             for ad in ads:
                 ad_domain = ad["Name"].lower()
@@ -244,6 +259,7 @@ Avoid markdown. Only return valid JSON array.
                     ad["Keyword"] = keyword
                     competitor_ads[ad["Name"]].append(ad)
 
+    # --- Summaries ---
     summary = []
     for name, ads in competitor_ads.items():
         summary.append(summarize_competitor(name, ads, lp_text))
