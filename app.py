@@ -229,16 +229,32 @@ def callback():
             "then sign in again in an incognito window.</p>"
         )
 
+    # set default login_customer_id based on email
+    DEFAULT_LOGIN_CUSTOMERS = {
+        "campaigns@digital.intelegencia.com": "9323527146",
+        "campaigns@unyscape.com": "2626812680"
+    }
+
+    # always define user_yaml + existing first
     user_yaml = user_yaml_path_for_email(email)
     existing = read_yaml(user_yaml) if os.path.exists(user_yaml) else {}
 
     user_config = deepcopy(base_config)
+
+    # use previously saved login_customer_id if available
     if "login_customer_id" in existing:
         user_config["login_customer_id"] = existing["login_customer_id"]
+    # otherwise fall back to defaults
+    elif email in DEFAULT_LOGIN_CUSTOMERS:
+        user_config["login_customer_id"] = DEFAULT_LOGIN_CUSTOMERS[email]
 
+    # update with new refresh_token
     user_config["refresh_token"] = refresh_token
+
+    # persist user config
     write_yaml(user_yaml, user_config)
 
+    # update session & global user list
     session.setdefault("authenticated_users", {})
     session["authenticated_users"][email] = user_yaml
     PERSISTED_USERS[email] = user_yaml
